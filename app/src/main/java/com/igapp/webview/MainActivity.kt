@@ -26,6 +26,7 @@ import androidx.core.content.getSystemService
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import android.os.Handler
 import android.os.Looper
@@ -89,10 +90,10 @@ class MainActivity : AppCompatActivity() {
         settings.allowFileAccess = true
         settings.mediaPlaybackRequiresUserGesture = false
 
-        // Always dark: tell the web page to use its dark theme (prefers-color-scheme: dark)
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
-        }
+        // Always dark: tell the web page to use its dark theme (prefers-color-scheme: dark).
+        // Works on every Android version, including Android 9 (the WebView itself is what matters).
+        applyWebDarkMode(settings)
+        warnIfWebViewOutdated()
 
         // Some devices need audio mode explicitly reset to NORMAL for WebView mic capture to work
         (getSystemService(AUDIO_SERVICE) as? AudioManager)?.mode = AudioManager.MODE_NORMAL
@@ -199,6 +200,42 @@ class MainActivity : AppCompatActivity() {
         if (notGranted.isNotEmpty()) {
             permissionLauncher.launch(notGranted.toTypedArray())
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyWebDarkMode(settings: WebSettings) {
+        try {
+            when {
+                // Android 13+ WebView
+                WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING) ->
+                    WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
+                // Android 5-12 (incl. Android 9): updatable WebView 76+
+                WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK) -> {
+                    WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
+                    if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
+                        // use Instagram's own dark theme, don't invert colours
+                        WebSettingsCompat.setForceDarkStrategy(
+                            settings, WebSettingsCompat.DARK_STRATEGY_WEB_THEME_DARKENING_ONLY
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) { /* dark mode still comes from ?theme=dark */ }
+    }
+
+    /** Old phones (e.g. Android 9) often have an outdated WebView, which Instagram web needs to be recent. */
+    private fun warnIfWebViewOutdated() {
+        try {
+            val major = WebViewCompat.getCurrentWebViewPackage(this)
+                ?.versionName?.substringBefore('.')?.toIntOrNull() ?: return
+            if (major < 100) {
+                Toast.makeText(
+                    this,
+                    "Please update \"Android System WebView\" from Play Store for the best Instagram experience",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } catch (e: Exception) { }
     }
 
     /** Link opened from another app (WhatsApp, Messenger, browser...) while the app is already running. */
