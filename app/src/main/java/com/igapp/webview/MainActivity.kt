@@ -2,6 +2,7 @@ package com.igapp.webview
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -16,6 +17,7 @@ import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -103,6 +105,15 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
         webView.webViewClient = object : WebViewClient() {
+            // Share buttons (WhatsApp, Messenger, Facebook, SMS...) use links WebView can't open itself.
+            // Send those to the real app instead of showing "Webpage not available".
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                handleExternalUrl(request.url)
+
+            @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
+                url?.let { handleExternalUrl(Uri.parse(it)) } ?: false
+
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 view.evaluateJavascript(FORCE_DARK_JS, null)
@@ -199,6 +210,72 @@ class MainActivity : AppCompatActivity() {
 
         if (notGranted.isNotEmpty()) {
             permissionLauncher.launch(notGranted.toTypedArray())
+        }
+    }
+
+    /**
+     * Returns true if the link was handed to another app (so WebView must not load it),
+     * false if the WebView should load it normally.
+     */
+    private fun handleExternalUrl(uri: Uri): Boolean {
+        val scheme = uri.scheme?.lowercase() ?: return false
+        when (scheme) {
+            "http", "https" -> {
+                val host = uri.host?.lowercase() ?: return false
+                val path = uri.path ?: ""
+                val isFacebook = host == "facebook.com" || host.endsWith(".facebook.com")
+                val isTwitter = host == "twitter.com" || host == "x.com" || host.endsWith(".twitter.com")
+                val external =
+                    host == "wa.me" || host == "whatsapp.com" || host.endsWith(".whatsapp.com") ||
+                    host == "m.me" || host == "t.me" || host == "telegram.me" ||
+                    (isFacebook && (path.startsWith("/sharer") || path.startsWith("/share") ||
+                        path.startsWith("/dialog/share") || path.startsWith("/dialog/send") ||
+                        path.startsWith("/send"))) ||
+                    (isTwitter && path.startsWith("/intent"))
+                if (!external) return false
+                openExternal(Intent(Intent.ACTION_VIEW, uri))
+                return true
+            }
+            // pages' own internal schemes stay inside the WebView
+            "about", "blob", "data", "javascript", "file", "content" -> return false
+            "intent" -> {
+                try {
+                    val i = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME).apply {
+                        addCategory(Intent.CATEGORY_BROWSABLE)
+                        component = null
+                        selector = null
+                    }
+                    startActivity(i)
+                } catch (e: ActivityNotFoundException) {
+                    val fallback = try {
+                        Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+                            .getStringExtra("browser_fallback_url")
+                    } catch (e2: Exception) { null }
+                    if (!fallback.isNullOrEmpty()) {
+                        openExternal(Intent(Intent.ACTION_VIEW, Uri.parse(fallback)))
+                    } else {
+                        Toast.makeText(this, "App not installed", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Can't open this link", Toast.LENGTH_SHORT).show()
+                }
+                return true
+            }
+            // whatsapp:, fb-messenger:, fb:, sms:, smsto:, mailto:, tel:, market:, tg: ...
+            else -> {
+                openExternal(Intent(Intent.ACTION_VIEW, uri))
+                return true
+            }
+        }
+    }
+
+    private fun openExternal(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "App not installed", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Can't open this link", Toast.LENGTH_SHORT).show()
         }
     }
 
