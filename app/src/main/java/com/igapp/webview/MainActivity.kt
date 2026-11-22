@@ -73,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         requestNeededPermissions()
 
         webView = WebView(this)
-        webView.setBackgroundColor(Color.BLACK) // no white flash before the page paints
+        webView.setBackgroundColor(Color.parseColor("#0C1014")) // no white flash before the page paints
         setContentView(webView)
 
         val settings: WebSettings = webView.settings
@@ -202,7 +202,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyStatusBarColor() {
-        val barColor = Color.BLACK // same as Instagram dark mode page background
+        val barColor = Color.parseColor("#0C1014") // exactly Instagram dark mode page background
 
         window.statusBarColor = barColor
         window.navigationBarColor = barColor
