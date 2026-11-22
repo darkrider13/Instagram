@@ -172,7 +172,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
         } else {
-            webView.loadUrl("https://www.instagram.com/?theme=dark")
+            webView.loadUrl(resolveStartUrl(intent))
         }
     }
 
@@ -199,6 +199,30 @@ class MainActivity : AppCompatActivity() {
         if (notGranted.isNotEmpty()) {
             permissionLauncher.launch(notGranted.toTypedArray())
         }
+    }
+
+    /** Link opened from another app (WhatsApp, Messenger, browser...) while the app is already running. */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent?.data != null) {
+            webView.loadUrl(resolveStartUrl(intent))
+        }
+    }
+
+    /** Returns the shared Instagram link if the app was opened from one, otherwise the home page. */
+    private fun resolveStartUrl(intent: Intent?): String {
+        val data = intent?.data
+        val host = data?.host?.lowercase()
+        val isInstagramLink = intent?.action == Intent.ACTION_VIEW &&
+            host != null &&
+            (host == "instagram.com" || host.endsWith(".instagram.com") ||
+             host == "instagr.am" || host.endsWith(".instagr.am") || host == "ig.me")
+        if (!isInstagramLink) return HOME_URL
+
+        val builder = data!!.buildUpon().scheme("https")
+        if (data.getQueryParameter("theme") == null) builder.appendQueryParameter("theme", "dark")
+        return builder.build().toString()
     }
 
     private fun applyStatusBarColor() {
@@ -236,6 +260,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val HOME_URL = "https://www.instagram.com/?theme=dark"
+
         // Makes sure Instagram web stays in dark mode and native bits (scrollbars, inputs) are dark too.
         private const val FORCE_DARK_JS = """
             (function() {
