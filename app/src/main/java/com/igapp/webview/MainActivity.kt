@@ -23,11 +23,19 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.getSystemService
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import android.os.Handler
+import android.os.Looper
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+
+    // Splash stays on screen until the first page is ready (or 3s max, e.g. offline)
+    @Volatile private var keepSplash = true
 
     // Holds the WebView's callback while the system file picker is open (for uploads)
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -55,12 +63,17 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splash = installSplashScreen()
+        splash.setKeepOnScreenCondition { keepSplash }
+        Handler(Looper.getMainLooper()).postDelayed({ keepSplash = false }, 3000)
+
         super.onCreate(savedInstanceState)
 
         applyStatusBarColor()
         requestNeededPermissions()
 
         webView = WebView(this)
+        webView.setBackgroundColor(Color.BLACK) // no white flash before the page paints
         setContentView(webView)
 
         val settings: WebSettings = webView.settings
@@ -76,6 +89,11 @@ class MainActivity : AppCompatActivity() {
         settings.allowFileAccess = true
         settings.mediaPlaybackRequiresUserGesture = false
 
+        // Always dark: tell the web page to use its dark theme (prefers-color-scheme: dark)
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
+        }
+
         // Some devices need audio mode explicitly reset to NORMAL for WebView mic capture to work
         (getSystemService(AUDIO_SERVICE) as? AudioManager)?.mode = AudioManager.MODE_NORMAL
 
@@ -86,7 +104,9 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
+                view.evaluateJavascript(FORCE_DARK_JS, null)
                 view.evaluateJavascript(HIDE_OPEN_APP_JS, null)
+                keepSplash = false
             }
         }
 
@@ -152,7 +172,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
         } else {
-            webView.loadUrl("https://www.instagram.com")
+            webView.loadUrl("https://www.instagram.com/?theme=dark")
         }
     }
 
@@ -182,10 +202,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyStatusBarColor() {
-        val barColor = Color.parseColor("#0C1014")
+        val barColor = Color.BLACK // same as Instagram dark mode page background
 
         window.statusBarColor = barColor
         window.navigationBarColor = barColor
+        window.decorView.setBackgroundColor(barColor)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.navigationBarDividerColor = barColor
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // stop Android from adding its own translucent scrim behind the bars
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
 
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
@@ -207,6 +236,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        // Makes sure Instagram web stays in dark mode and native bits (scrollbars, inputs) are dark too.
+        private const val FORCE_DARK_JS = """
+            (function() {
+                try {
+                    document.documentElement.style.setProperty('color-scheme', 'dark');
+                } catch (e) {}
+            })();
+        """
+
         // Continuously watches the page for "Open app" / "Get the app"
         // style native-app install prompts and hides them as they appear,
         // including ones added later while scrolling. Matches by visible
