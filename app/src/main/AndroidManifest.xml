@@ -26,11 +26,28 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.IG.Splash"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Open every Instagram link (reels, posts, profiles, stories, DMs, share links)
+                 from WhatsApp, Messenger, browser, etc. inside this app -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="instagram.com" />
+                <data android:host="www.instagram.com" />
+                <data android:host="m.instagram.com" />
+                <data android:host="instagr.am" />
+                <data android:host="www.instagr.am" />
+                <data android:host="ig.me" />
             </intent-filter>
         </activity>
     </application>
