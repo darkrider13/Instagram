@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Instagram web dark mode background: pure black. Used for splash, window, status bar & nav bar. -->
+    <color name="ig_bg">#000000</color>
+</resources>

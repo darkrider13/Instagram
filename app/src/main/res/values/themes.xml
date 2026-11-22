@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Main app theme (dark, everything black to match Instagram dark mode) -->
+    <style name="Theme.IG" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/ig_bg</item>
+        <item name="android:statusBarColor">@color/ig_bg</item>
+        <item name="android:navigationBarColor">@color/ig_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorBackground">@color/ig_bg</item>
+    </style>
+
+    <!-- Splash theme: black screen + gradient outline Instagram glyph, no white icon box -->
+    <style name="Theme.IG.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ig_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_glyph</item>
+        <item name="postSplashScreenTheme">@style/Theme.IG</item>
+        <item name="android:statusBarColor">@color/ig_bg</item>
+        <item name="android:navigationBarColor">@color/ig_bg</item>
+    </style>
+
+</resources>
