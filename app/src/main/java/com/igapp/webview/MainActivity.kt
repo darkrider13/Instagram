@@ -121,6 +121,13 @@ class MainActivity : AppCompatActivity() {
         settings.allowFileAccess = true
         settings.mediaPlaybackRequiresUserGesture = false
 
+        // Desktop site mode: Instagram's mobile web profile header (followers / following / bio)
+        // vanishes after a moment, but the desktop version loads it fine. Same as Chrome's "Desktop site".
+        val chromeMajor = Regex("Chrome/(\\d+)").find(settings.userAgentString)?.groupValues?.get(1) ?: "120"
+        settings.userAgentString =
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/$chromeMajor.0.0.0 Safari/537.36"
+
         // Always dark: tell the web page to use its dark theme (prefers-color-scheme: dark).
         // Works on every Android version, including Android 9 (the WebView itself is what matters).
         applyWebDarkMode(settings)
@@ -147,11 +154,13 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 super.onPageCommitVisible(view, url)
+                view.evaluateJavascript(FIT_SCREEN_JS, null)
                 if (!loaderHidden) view.evaluateJavascript(FEED_READY_JS, null)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
+                view.evaluateJavascript(FIT_SCREEN_JS, null)
                 view.evaluateJavascript(FORCE_DARK_JS, null)
                 view.evaluateJavascript(HIDE_OPEN_APP_JS, null)
                 keepSplash = false
@@ -538,6 +547,32 @@ class MainActivity : AppCompatActivity() {
                         });
                     }
                 }, 120);
+            })();
+        """
+
+        // Desktop layout fitted to the phone screen: a fixed 800px-wide viewport (Instagram keeps its
+        // desktop layout above ~770px). Lower the number = bigger content, but under ~770 Instagram
+        // flips back to the mobile layout (the one that loses the profile header).
+        private const val FIT_SCREEN_JS = """
+            (function() {
+                function apply() {
+                    try {
+                        var m = document.querySelector('meta[name="viewport"]');
+                        if (!m) {
+                            m = document.createElement('meta');
+                            m.name = 'viewport';
+                            (document.head || document.documentElement).appendChild(m);
+                        }
+                        var want = 'width=800, user-scalable=yes';
+                        if (m.getAttribute('content') !== want) m.setAttribute('content', want);
+                    } catch (e) {}
+                }
+                apply();
+                if (window.__fitWatch) return;
+                window.__fitWatch = true;
+                try {
+                    new MutationObserver(apply).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['content'] });
+                } catch (e) {}
             })();
         """
 
