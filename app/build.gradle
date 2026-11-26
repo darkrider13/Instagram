@@ -15,10 +15,24 @@ android {
         versionName "1.0"
     }
 
+    // Fixed signing key (app/igapp.jks) so every build has the same signature
+    // and a new APK installs over the old one without uninstalling.
+    signingConfigs {
+        igapp {
+            storeFile file('igapp.jks')
+            storePassword 'igapp123456'
+            keyAlias 'igapp'
+            keyPassword 'igapp123456'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.igapp
+        }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.igapp
         }
     }
 
