@@ -22,6 +22,17 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
+import android.webkit.JavascriptInterface
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.getSystemService
@@ -39,6 +50,11 @@ class MainActivity : AppCompatActivity() {
 
     // Splash stays on screen until the first page is ready (or 3s max, e.g. offline)
     @Volatile private var keepSplash = true
+
+    // Native loading cover (logo + 3 blinking dots) shown until the home feed is really drawn
+    private var loaderView: FrameLayout? = null
+    private var loaderHidden = false
+    private val dotAnimators = mutableListOf<ObjectAnimator>()
 
     // Holds the WebView's callback while the system file picker is open (for uploads)
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -77,7 +93,20 @@ class MainActivity : AppCompatActivity() {
 
         webView = WebView(this)
         webView.setBackgroundColor(Color.parseColor("#0C1014")) // no white flash before the page paints
-        setContentView(webView)
+        val root = FrameLayout(this)
+        root.setBackgroundColor(Color.parseColor("#0C1014"))
+        root.addView(webView, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(root)
+
+        // Loading cover: sits under the system splash, so when the splash lifts you see the same logo
+        // with three blinking dots. Status + navigation bar are black too, matching the cover.
+        val loader = buildLoader()
+        loaderView = loader
+        root.addView(loader, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setBarColors(Color.BLACK)
+        keepSplash = false   // the cover is ready, let the system splash hand over to it right away
+        // Safety net: never keep the cover up for more than 9 seconds.
+        webView.postDelayed({ hideLoader() }, 9000)
 
         val settings: WebSettings = webView.settings
         settings.javaScriptEnabled = true
@@ -104,6 +133,8 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
+        webView.addJavascriptInterface(LoaderBridge(), "AndroidLoader")
+
         webView.webViewClient = object : WebViewClient() {
             // Share buttons (WhatsApp, Messenger, Facebook, SMS...) use links WebView can't open itself.
             // Send those to the real app instead of showing "Webpage not available".
@@ -114,11 +145,21 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
                 url?.let { handleExternalUrl(Uri.parse(it)) } ?: false
 
+            override fun onPageCommitVisible(view: WebView, url: String?) {
+                super.onPageCommitVisible(view, url)
+                if (!loaderHidden) view.evaluateJavascript(FEED_READY_JS, null)
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 view.evaluateJavascript(FORCE_DARK_JS, null)
                 view.evaluateJavascript(HIDE_OPEN_APP_JS, null)
                 keepSplash = false
+                if (!loaderHidden) {
+                    view.evaluateJavascript(FEED_READY_JS, null)
+                    // Any page other than the home feed (login, a shared link...) has no feed to wait for.
+                    if (!isHomeUrl(url)) view.postDelayed({ hideLoader() }, 500)
+                }
             }
         }
 
@@ -339,6 +380,92 @@ class MainActivity : AppCompatActivity() {
         return builder.build().toString()
     }
 
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun setBarColors(color: Int) {
+        window.statusBarColor = color
+        window.navigationBarColor = color
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.navigationBarDividerColor = color
+        }
+    }
+
+    /** True for the Instagram home feed (where we wait for posts to draw). */
+    private fun isHomeUrl(url: String?): Boolean {
+        val u = url?.let { Uri.parse(it) } ?: return false
+        val host = u.host?.lowercase() ?: return false
+        if (!(host == "instagram.com" || host.endsWith(".instagram.com"))) return false
+        return (u.path ?: "").trimEnd('/').isEmpty()
+    }
+
+    /** Splash-style cover: Instagram glyph with three softly blinking dots underneath. */
+    private fun buildLoader(): FrameLayout {
+        val overlay = FrameLayout(this)
+        overlay.setBackgroundColor(Color.BLACK)
+        overlay.isClickable = true      // swallow touches while the page is still loading
+        overlay.isFocusable = true
+
+        val logo = ImageView(this)
+        logo.setImageResource(R.drawable.ic_splash_vector)
+        logo.scaleType = ImageView.ScaleType.FIT_CENTER
+        overlay.addView(logo, FrameLayout.LayoutParams(dp(288), dp(288), Gravity.CENTER))
+
+        val dots = LinearLayout(this)
+        dots.orientation = LinearLayout.HORIZONTAL
+        dots.gravity = Gravity.CENTER
+        for (i in 0..2) {
+            val dot = View(this)
+            val shape = GradientDrawable()
+            shape.shape = GradientDrawable.OVAL
+            shape.setColor(Color.parseColor("#E1306C"))
+            dot.background = shape
+            dot.alpha = 0.2f
+            val lp = LinearLayout.LayoutParams(dp(9), dp(9))
+            lp.marginStart = dp(6)
+            lp.marginEnd = dp(6)
+            dots.addView(dot, lp)
+
+            val anim = ObjectAnimator.ofFloat(dot, View.ALPHA, 0.2f, 1f, 0.2f)
+            anim.duration = 1050
+            anim.startDelay = i * 170L
+            anim.repeatCount = ValueAnimator.INFINITE
+            anim.interpolator = LinearInterpolator()
+            dotAnimators.add(anim)
+        }
+        overlay.addView(
+            dots,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+        )
+        dots.translationY = dp(70).toFloat()   // just below the glyph
+        dotAnimators.forEach { it.start() }
+        return overlay
+    }
+
+    /** Fades the cover out (and the bars from black to the normal page colour); safe to call many times. */
+    private fun hideLoader() {
+        if (loaderHidden) return
+        loaderHidden = true
+        val v = loaderView ?: return
+        ValueAnimator.ofArgb(Color.BLACK, Color.parseColor("#0C1014")).apply {
+            duration = 220
+            addUpdateListener { setBarColors(it.animatedValue as Int) }
+            start()
+        }
+        v.animate().alpha(0f).setDuration(220).withEndAction {
+            dotAnimators.forEach { it.cancel() }
+            dotAnimators.clear()
+            (v.parent as? ViewGroup)?.removeView(v)
+            loaderView = null
+        }.start()
+    }
+
+    private inner class LoaderBridge {
+        @JavascriptInterface
+        fun ready() {
+            runOnUiThread { hideLoader() }
+        }
+    }
+
     private fun applyStatusBarColor() {
         val barColor = Color.parseColor("#0C1014") // exactly Instagram dark mode page background
 
@@ -375,6 +502,44 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val HOME_URL = "https://www.instagram.com/?theme=dark"
+
+        // Tells the app when the page is really ready (a post / big images drawn, or a login form),
+        // so the native loading cover can be removed.
+        private const val FEED_READY_JS = """
+            (function() {
+                if (window.__igReadyWatch) return;
+                window.__igReadyWatch = true;
+                var t0 = Date.now(), fired = false;
+                function bigImagesShown() {
+                    var imgs = document.images, n = 0;
+                    for (var i = 0; i < imgs.length; i++) {
+                        var im = imgs[i];
+                        if (!im.complete || im.naturalWidth < 120) continue;
+                        var r = im.getBoundingClientRect();
+                        if (r.width > 120 && r.height > 80 && r.bottom > 0 && r.top < window.innerHeight) n++;
+                    }
+                    return n >= 2;
+                }
+                function isReady() {
+                    if (document.querySelector('input[type="password"]')) return true;   // login page
+                    if (document.querySelector('article')) return true;                  // a post is drawn
+                    return bigImagesShown();                                             // photos drawn
+                }
+                var timer = setInterval(function() {
+                    if (fired) return;
+                    var ok = false;
+                    try { ok = isReady(); } catch (e) {}
+                    if (ok || Date.now() - t0 > 7000) {
+                        fired = true;
+                        clearInterval(timer);
+                        // one more frame so the feed is really painted before the cover is lifted
+                        requestAnimationFrame(function() {
+                            setTimeout(function() { try { AndroidLoader.ready(); } catch (e) {} }, 120);
+                        });
+                    }
+                }, 120);
+            })();
+        """
 
         // Makes sure Instagram web stays in dark mode and native bits (scrollbars, inputs) are dark too.
         private const val FORCE_DARK_JS = """
